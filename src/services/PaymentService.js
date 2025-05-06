@@ -15,64 +15,11 @@ function sortObject(obj) {
       sorted[key] = obj[key];
     }
   }
-
   return sorted;
 }
 
-//tạo Payment
-const createPayment = (newPayment) => {
-  return new Promise(async (resolve, reject) => {
-    const {
-      paymentCode,
-      paymentName,
-      paymentMethod,
-      userBank,
-      userBankNumber,
-      // adminBank,
-      // adminBankNumber,
-      // adminBankImage,
-      orderId,
-    } = newPayment;
-
-    try {
-      // Kiểm tra `orderId` có tồn tại
-      const existingOrder = await Order.findById(orderId);
-      if (!existingOrder) {
-        return resolve({
-          status: "ERR",
-          message: "Order not found",
-        });
-      }
-
-      // Tạo `paymentCode` tự động
-
-      const createdPayment = await Payment.create({
-        paymentCode,
-        paymentName,
-        paymentMethod,
-        userBank,
-        userBankNumber,
-        // adminBank,
-        // adminBankNumber,
-        // adminBankImage,
-        orderId,
-      });
-
-      if (createdPayment) {
-        resolve({
-          status: "OK",
-          message: "SUCCESS",
-          data: createdPayment,
-        });
-      }
-    } catch (e) {
-      reject(e);
-    }
-  });
-};
-
 // Create VNPay payment URL
-const createVnpayPaymentUrl = (paymentData) => {
+const createPaymentUrl = (paymentData) => {
   return new Promise(async (resolve, reject) => {
     try {
       const { amount, orderInfo, bankCode, language, orderId, ipAddr } = paymentData;
@@ -119,24 +66,31 @@ const createVnpayPaymentUrl = (paymentData) => {
       vnpParams = sortObject(vnpParams);
 
       // Create signature
-      let signData = querystring.stringify(vnpParams, { encode: false });
+      let signData = querystring.stringify(vnpParams);
       let hmac = crypto.createHmac("sha512", vnpayConfig.vnp_HashSecret);
       let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
 
       vnpParams['vnp_SecureHash'] = signed;
 
       // Create payment URL
-      const paymentUrl = vnpayConfig.vnp_Url + '?' + querystring.stringify(vnpParams, { encode: false });
+      const paymentUrl = vnpayConfig.vnp_Url + '?' + querystring.stringify(vnpParams);
 
-      // Create a record in the Payment model
-      const payment = await Payment.create({
-        paymentCode: txnRef,
-        paymentName: orderInfo || `Thanh toan don hang ${orderId}`,
-        paymentMethod: 'vnpay',
-        userBank: bankCode || 'VNPAY',
-        userBankNumber: '', // Will be updated after successful payment
-        orderId: orderId,
-      });
+      try {
+        // Create a record in the Payment model
+        const payment = await Payment.create({
+          paymentCode: txnRef,
+          orderId: orderId,
+          amount: amount,
+          bankCode: bankCode || '',
+          orderInfo: orderInfo || `Thanh_toan_don_hang_${orderId}`,
+          paymentMethod: 'VNPAY'
+        });
+
+        console.log("Payment record created:", payment);
+      } catch (paymentError) {
+        console.log("Error creating payment record:", paymentError);
+        // Continue even if payment record creation fails
+      }
 
       resolve({
         status: "OK",
@@ -146,13 +100,14 @@ const createVnpayPaymentUrl = (paymentData) => {
         txnRef: txnRef
       });
     } catch (e) {
+      console.error("Error in createPaymentUrl:", e);
       reject(e);
     }
   });
 };
 
-// Process VNPay payment return
-const processVnpayReturn = (vnpParams) => {
+// Process VNPay payment return/IPN
+const processPaymentReturn = (vnpParams) => {
   return new Promise(async (resolve, reject) => {
     try {
       // Get secure hash from response
@@ -196,12 +151,20 @@ const processVnpayReturn = (vnpParams) => {
           });
         }
 
-        // If payment successful
-        if (responseCode === '00') {
-          // Update payment details
-          payment.userBankNumber = vnpParams['vnp_CardNumber'] || '';
-          await payment.save();
+        // Update payment details with response data
+        payment.bankCode = vnpParams['vnp_BankCode'] || payment.bankCode;
+        payment.bankTranNo = vnpParams['vnp_BankTranNo'] || '';
+        payment.cardType = vnpParams['vnp_CardType'] || '';
+        payment.payDate = vnpParams['vnp_PayDate'] || '';
+        payment.responseCode = responseCode;
+        payment.transactionStatus = vnpParams['vnp_TransactionStatus'] || '';
+        payment.txnRef = txnRef;
+        payment.secureHash = secureHash;
 
+        await payment.save();
+
+        // If payment successful (responseCode = '00')
+        if (responseCode === '00') {
           // Update order status to paid
           order.isPaid = true;
           order.paidAt = Date.now();
@@ -236,166 +199,177 @@ const processVnpayReturn = (vnpParams) => {
         });
       }
     } catch (e) {
+      console.error("Error processing payment return:", e);
       reject(e);
     }
   });
 };
 
-//update Payment
-const updatePayment = (id, data) => {
+// Get payment details
+const getPaymentByOrderId = (orderId) => {
   return new Promise(async (resolve, reject) => {
     try {
-      //check name created
-      const checkPayment = await Payment.findOne({
-        _id: id,
-      });
-      //console.log("checkUser", checkUser);
+      const payment = await Payment.findOne({ orderId: orderId });
 
-      //nếu Payment ko tồn tại
-      if (checkPayment === null) {
-        resolve({
-          status: "OK",
-          message: "The Payment is not defined",
-        });
-      }
-
-      const updatedPayment = await Payment.findByIdAndUpdate(id, data, {
-        new: true,
-      });
-      //console.log("updatedPayment", updatedPayment);
-      resolve({
-        status: "OK",
-        message: "SUCCESS",
-        data: updatedPayment,
-      });
-    } catch (e) {
-      reject(e);
-    }
-  });
-};
-
-//delete Payment
-const deletePayment = (id) => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      //check Payment created
-      const checkPayment = await Payment.findOne({
-        _id: id,
-      });
-      //console.log("checkPayment", checkPayment);
-
-      //nếu Payment ko tồn tại
-      if (checkPayment === null) {
-        resolve({
-          status: "OK",
-          message: "The Payment is not defined",
-        });
-      }
-
-      await Payment.findByIdAndDelete(id);
-      //console.log("updatedPayment", updatedPayment);
-      resolve({
-        status: "OK",
-        message: "DELETE Payment IS SUCCESS",
-      });
-    } catch (e) {
-      reject(e);
-    }
-  });
-};
-
-//get details Payment
-const getDetailsPayment = (id) => {
-  return new Promise(async (resolve, reject) => {
-    try {
-      //check email created
-      const Payment = await Payment.findOne({
-        _id: id,
-      });
-
-      //nếu Payment ko tồn tại
-      if (Payment === null) {
-        resolve({
-          status: "OK",
-          message: "The Payment is not defined",
+      if (!payment) {
+        return resolve({
+          status: "ERR",
+          message: "Payment not found for this order"
         });
       }
 
       resolve({
         status: "OK",
         message: "SUCCESS",
-        data: Payment,
+        data: payment
       });
     } catch (e) {
+      console.error("Error getting payment details:", e);
       reject(e);
     }
   });
 };
 
-//get all Payment
-const getAllPayment = (limit, page, sort, filter) => {
+// Get all payments (for admin)
+const getAllPayments = (limit, page, sort, filter) => {
   return new Promise(async (resolve, reject) => {
     try {
-      const totalPayment = await Payment.countDocuments();
+      const totalPayments = await Payment.countDocuments();
+      let query = Payment.find();
 
+      // Apply filter if provided
       if (filter) {
         const label = filter[0];
-        const allPaymentFilter = await Payment.find({
-          [label]: { $regex: filter[1] },
-        })
-          .limit(limit)
-          .skip(page * limit); //filter gần đúng
-        resolve({
-          status: "OK",
-          message: "Get all Payment IS SUCCESS",
-          data: allPaymentFilter,
-          total: totalPayment,
-          pageCurrent: Number(page + 1),
-          totalPage: Math.ceil(totalPayment / limit),
-        });
+        const value = filter[1];
+
+        // Special handling for filter by payment status
+        if (label === 'status') {
+          if (value === 'success') {
+            query = query.where('responseCode').equals('00');
+          } else if (value === 'failed') {
+            query = query.where('responseCode').ne('00');
+          }
+        } else {
+          query = query.where(label).regex(new RegExp(value, 'i'));
+        }
       }
 
+      // Apply sorting if provided
       if (sort) {
-        const objectSort = {};
-        objectSort[sort[1]] = sort[0];
-        //console.log('objectSort', objectSort)
-        const allPaymentSort = await Payment.find()
-          .limit(limit)
-          .skip(page * limit)
-          .sort(objectSort);
-        resolve({
-          status: "OK",
-          message: "Get all Payment IS SUCCESS",
-          data: allPaymentSort,
-          total: totalPayment,
-          pageCurrent: Number(page + 1),
-          totalPage: Math.ceil(totalPayment / limit),
-        });
+        const sortOrder = sort[0]; // 'asc' or 'desc'
+        const sortField = sort[1]; // field name
+
+        const sortObj = {};
+        sortObj[sortField] = sortOrder === 'asc' ? 1 : -1;
+        query = query.sort(sortObj);
+      } else {
+        // Default sort by createdAt descending
+        query = query.sort({ createdAt: -1 });
       }
 
-      const allPayment = await Payment.find()
-        .limit(limit)
-        .skip(page * limit);
+      // Apply pagination
+      const skip = page * limit;
+      query = query.skip(skip).limit(limit);
+
+      // Populate order details
+      query = query.populate({
+        path: 'orderId',
+        select: 'totalItemPrice shippingPrice user'
+      });
+
+      const payments = await query.exec();
+
       resolve({
         status: "OK",
-        message: "Get all Payment IS SUCCESS",
-        data: allPayment,
-        total: totalPayment,
+        message: "Get all payments successful",
+        data: payments,
+        total: totalPayments,
         pageCurrent: Number(page + 1),
-        totalPage: Math.ceil(totalPayment / limit),
+        totalPage: Math.ceil(totalPayments / limit),
       });
     } catch (e) {
+      console.error("Error getting all payments:", e);
+      reject(e);
+    }
+  });
+};
+
+// Create COD payment
+const createCodPayment = (paymentData) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { orderId, amount, paymentMethod } = paymentData;
+
+      // Get the order details
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return resolve({
+          status: "ERR",
+          message: "Order not found"
+        });
+      }
+
+      // Set timezone
+      process.env.TZ = 'Asia/Ho_Chi_Minh';
+
+      // Create date object
+      const date = new Date();
+      const createDate = moment(date).format('YYYYMMDDHHmmss');
+
+      // Create transaction reference for COD (COD prefix + timestamp + order ID)
+      const txnRef = `COD${moment(date).format('HHmmss')}${orderId.toString().slice(-6)}`;
+
+      try {
+        // Create a record in the Payment model
+        const payment = await Payment.create({
+          paymentCode: txnRef,
+          orderId: orderId,
+          amount: amount,
+          bankCode: '',
+          orderInfo: `Thanh toan COD cho don hang ${orderId}`,
+          paymentMethod: paymentMethod || 'COD',
+          responseCode: 'COD_PENDING', // Special code for COD
+          transactionStatus: 'PENDING'
+        });
+
+        // Update order status
+        order.paymentMethod = 'COD';
+        order.orderStatus = 'PROCESSING';
+        order.paymentResult = {
+          id: txnRef,
+          status: 'PENDING',
+          update_time: moment().format('YYYYMMDDHHmmss'),
+          email_address: '',
+        };
+        await order.save();
+
+        console.log("COD payment record created:", payment);
+
+        resolve({
+          status: "OK",
+          message: "COD payment processed successfully",
+          code: '00',
+          data: {
+            paymentId: payment._id,
+            txnRef: txnRef,
+            orderId: orderId
+          }
+        });
+      } catch (paymentError) {
+        console.error("Error creating COD payment record:", paymentError);
+        reject(paymentError);
+      }
+    } catch (e) {
+      console.error("Error in createCodPayment:", e);
       reject(e);
     }
   });
 };
 
 module.exports = {
-  createPayment,
-  updatePayment,
-  deletePayment,
-  getDetailsPayment,
-  getAllPayment,
-  createVnpayPaymentUrl,
-  processVnpayReturn
+  createPaymentUrl,
+  processPaymentReturn,
+  getPaymentByOrderId,
+  getAllPayments,
+  createCodPayment
 };

@@ -1,41 +1,24 @@
 const PaymentService = require("../services/PaymentService");
+const vnpayConfig = require("../config/vnpay");
+const crypto = require("crypto");
+const moment = require("moment");
+const querystring = require("qs");
+
+// Helper function to sort object by key (for VNPay)
+function sortObject(obj) {
+  const sorted = {};
+  const keys = Object.keys(obj).sort();
+
+  for (const key of keys) {
+    if (obj.hasOwnProperty(key)) {
+      sorted[key] = obj[key];
+    }
+  }
+  return sorted;
+}
 
 //create Payment
 const createPayment = async (req, res) => {
-  try {
-    //test input data
-    const {
-      paymentCode,
-      paymentName,
-      paymentMethod,
-      userBank,
-      userBankNumber,
-      // adminBank,
-      // adminBankNumber,
-      // adminBankImage,
-      orderId,
-    } = req.body;
-    //console.log("req.body", req.body);
-
-    if (!userBank || !userBankNumber || !orderId) {
-      //check have
-      return res.status(200).json({
-        status: "ERR",
-        message: "The input is required",
-      });
-    }
-
-    const response = await PaymentService.createPayment(req.body);
-    return res.status(200).json(response);
-  } catch (e) {
-    return res.status(404).json({
-      message: e,
-    });
-  }
-};
-
-// Create VNPay payment URL
-const createVnpayPayment = async (req, res) => {
   try {
     const { amount, orderInfo, bankCode, language, orderId } = req.body;
 
@@ -46,11 +29,28 @@ const createVnpayPayment = async (req, res) => {
       });
     }
 
+    // Validate that the orderId exists
+    try {
+      const Order = require('../models/OrderModel');
+      const orderExists = await Order.findById(orderId);
+      if (!orderExists) {
+        return res.status(200).json({
+          status: "ERR",
+          message: "Order not found",
+        });
+      }
+    } catch (error) {
+      return res.status(200).json({
+        status: "ERR",
+        message: "Invalid orderId format or order not found",
+      });
+    }
+
     // Get IP address
     let ipAddr = req.headers['x-forwarded-for'] ||
-                 req.connection.remoteAddress ||
-                 req.socket.remoteAddress ||
-                 req.connection.socket.remoteAddress;
+                req.connection.remoteAddress ||
+                req.socket.remoteAddress ||
+                req.connection.socket.remoteAddress;
 
     // If IP is IPv6 localhost, convert to IPv4 format
     if (ipAddr === '::1' || ipAddr.includes('::ffff:')) {
@@ -59,14 +59,21 @@ const createVnpayPayment = async (req, res) => {
 
     const paymentData = {
       amount,
-      orderInfo,
+      orderInfo: orderInfo || `Thanh toan don hang ${orderId}`,
       bankCode: bankCode || '',
       language: language || 'vn',
       orderId,
       ipAddr
     };
 
-    const response = await PaymentService.createVnpayPaymentUrl(paymentData);
+    // Console log for debugging
+    console.log("Creating VNPay payment with data:", paymentData);
+
+    const response = await PaymentService.createPaymentUrl(paymentData);
+
+    // Console log for debugging
+    console.log("VNPay payment URL created:", response);
+
     return res.status(200).json(response);
   } catch (e) {
     console.error("Error creating VNPay payment:", e);
@@ -78,10 +85,10 @@ const createVnpayPayment = async (req, res) => {
 };
 
 // Process VNPay return
-const vnpayReturn = async (req, res) => {
+const paymentReturn = async (req, res) => {
   try {
     const vnpParams = req.query;
-    const response = await PaymentService.processVnpayReturn(vnpParams);
+    const response = await PaymentService.processPaymentReturn(vnpParams);
 
     // For direct browser returns, redirect to frontend with params
     if (req.headers.accept?.includes('text/html')) {
@@ -101,16 +108,16 @@ const vnpayReturn = async (req, res) => {
     console.error("Error processing VNPay return:", e);
     return res.status(404).json({
       status: "ERR",
-      message: e.message || "An error occurred while processing VNPay payment return",
+      message: e.message || "An error occurred while processing payment return",
     });
   }
 };
 
 // Process IPN callback from VNPay
-const vnpayIpn = async (req, res) => {
+const paymentIpn = async (req, res) => {
   try {
     const vnpParams = req.query;
-    const response = await PaymentService.processVnpayReturn(vnpParams);
+    const response = await PaymentService.processPaymentReturn(vnpParams);
 
     // Always return standard format for VNPay IPN
     if (response.status === "OK") {
@@ -125,7 +132,7 @@ const vnpayIpn = async (req, res) => {
       });
     }
   } catch (e) {
-    console.error("Error processing VNPay IPN:", e);
+    console.error("Error processing payment IPN:", e);
     return res.status(200).json({
       RspCode: "99",
       Message: "Unknown error"
@@ -133,75 +140,34 @@ const vnpayIpn = async (req, res) => {
   }
 };
 
-//update Payment
-const updatePayment = async (req, res) => {
+// Get payment by order ID
+const getPaymentByOrderId = async (req, res) => {
   try {
-    const PaymentId = req.params.id;
-    const data = req.body;
-    if (!PaymentId) {
+    const orderId = req.params.orderId;
+
+    if (!orderId) {
       return res.status(200).json({
         status: "ERR",
-        message: "The PaymentId is required",
+        message: "Order ID is required",
       });
     }
 
-    const response = await PaymentService.updatePayment(PaymentId, data);
+    const response = await PaymentService.getPaymentByOrderId(orderId);
     return res.status(200).json(response);
   } catch (e) {
+    console.error("Error getting payment details:", e);
     return res.status(404).json({
-      message: e,
+      status: "ERR",
+      message: e.message || "An error occurred while getting payment details",
     });
   }
 };
 
-//delete Payment
-const deletePayment = async (req, res) => {
-  try {
-    const PaymentId = req.params.id;
-    //const token = req.headers;
-
-    if (!PaymentId) {
-      return res.status(200).json({
-        status: "ERR",
-        message: "The PaymentId is required",
-      });
-    }
-
-    const response = await PaymentService.deletePayment(PaymentId);
-    return res.status(200).json(response);
-  } catch (e) {
-    return res.status(404).json({
-      message: e,
-    });
-  }
-};
-
-//get details Payment
-const getDetailsPayment = async (req, res) => {
-  try {
-    const PaymentId = req.params.id;
-
-    if (!PaymentId) {
-      return res.status(200).json({
-        status: "ERR",
-        message: "The PaymentId is required",
-      });
-    }
-
-    const response = await PaymentService.getDetailsPayment(PaymentId);
-    return res.status(200).json(response);
-  } catch (e) {
-    return res.status(404).json({
-      message: e,
-    });
-  }
-};
-
-//get all Payment
-const getAllPayment = async (req, res) => {
+// Get all payments (admin)
+const getAllPayments = async (req, res) => {
   try {
     const { limit, page, sort, filter } = req.query;
-    const response = await PaymentService.getAllPayment(
+    const response = await PaymentService.getAllPayments(
       Number(limit) || 8,
       Number(page) || 0,
       sort,
@@ -209,19 +175,65 @@ const getAllPayment = async (req, res) => {
     );
     return res.status(200).json(response);
   } catch (e) {
+    console.error("Error getting all payments:", e);
     return res.status(404).json({
-      message: e,
+      status: "ERR",
+      message: e.message || "An error occurred while getting payments",
+    });
+  }
+};
+
+// Process COD payment
+const processCodPayment = async (req, res) => {
+  try {
+    const { orderId, amount, paymentMethod } = req.body;
+
+    if (!orderId || !amount) {
+      return res.status(200).json({
+        status: "ERR",
+        message: "orderId and amount are required",
+      });
+    }
+
+    // Validate that the orderId exists
+    try {
+      const Order = require('../models/OrderModel');
+      const orderExists = await Order.findById(orderId);
+      if (!orderExists) {
+        return res.status(200).json({
+          status: "ERR",
+          message: "Order not found",
+        });
+      }
+
+      // Create a COD payment record
+      const response = await PaymentService.createCodPayment({
+        orderId,
+        amount,
+        paymentMethod: paymentMethod || "COD"
+      });
+
+      return res.status(200).json(response);
+    } catch (error) {
+      return res.status(200).json({
+        status: "ERR",
+        message: "Invalid orderId format or order not found",
+      });
+    }
+  } catch (e) {
+    console.error("Error processing COD payment:", e);
+    return res.status(404).json({
+      status: "ERR",
+      message: e.message || "An error occurred while processing COD payment",
     });
   }
 };
 
 module.exports = {
   createPayment,
-  updatePayment,
-  deletePayment,
-  getDetailsPayment,
-  getAllPayment,
-  createVnpayPayment,
-  vnpayReturn,
-  vnpayIpn
+  paymentReturn,
+  paymentIpn,
+  getPaymentByOrderId,
+  getAllPayments,
+  processCodPayment
 };

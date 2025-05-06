@@ -5,49 +5,64 @@ const paymentSchema = new mongoose.Schema(
     paymentCode: {
       type: String,
       required: true,
-      unique: true, // Mã thanh toán duy nhất
+      unique: true, // Mã giao dịch VNPay (vnp_TxnRef)
     },
-    paymentName: {
-      type: String,
-      required: false, // Tên giao dịch thanh toán
-    },
-    paymentMethod: {
-      type: String,
-      required: false, // Phương thức thanh toán (VD: bank_transfer, cash)
-    },
-    userBank: {
-      // type: mongoose.Schema.Types.ObjectId,
-      // ref: "Bank", // Liên kết với model Bank
-      type: String,
-      required: true,
-    },
-    userBankNumber: {
-      type: String,
-      required: true, // Số tài khoản người dùng
-    },
-    // adminBank: {
-    //   type: mongoose.Schema.Types.ObjectId,
-    //   ref: "Bank", // Liên kết với model Bank
-    //   required: false, // Tên ngân hàng của admin
-    // },
-    // adminBankNumber: {
-    //   type: String,
-    //   required: false, // Số tài khoản admin
-    // },
-    // adminBankImage: {
-    //   type: String,
-    //   required: false, // Hình ảnh (QR code hoặc logo) ngân hàng admin
-    // },
     orderId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Order", // Liên kết với đơn hàng
       required: true,
     },
+    amount: {
+      type: Number,
+      required: true, // Số tiền thanh toán
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['VNPAY', 'COD', 'OTHER'],
+      default: 'VNPAY',
+      required: true, // Phương thức thanh toán
+    },
+    bankCode: {
+      type: String,
+      required: false, // Mã ngân hàng VNPay (vnp_BankCode)
+    },
+    bankTranNo: {
+      type: String,
+      required: false, // Mã giao dịch tại ngân hàng (vnp_BankTranNo)
+    },
+    cardType: {
+      type: String,
+      required: false, // Loại thẻ thanh toán (vnp_CardType)
+    },
+    orderInfo: {
+      type: String,
+      required: false, // Thông tin đơn hàng (vnp_OrderInfo)
+    },
+    payDate: {
+      type: String,
+      required: false, // Thời gian thanh toán (vnp_PayDate) định dạng yyyyMMddHHmmss
+    },
+    responseCode: {
+      type: String,
+      required: false, // Mã phản hồi (vnp_ResponseCode), 00 = thành công
+    },
+    transactionStatus: {
+      type: String,
+      required: false, // Trạng thái giao dịch (vnp_TransactionStatus), 00 = thành công
+    },
+    txnRef: {
+      type: String,
+      required: false, // Mã tham chiếu giao dịch (vnp_TxnRef)
+    },
+    secureHash: {
+      type: String,
+      required: false, // Mã hash xác thực (vnp_SecureHash)
+    }
   },
   {
     timestamps: true, // Tự động thêm createdAt và updatedAt
   }
 );
 
-const Payment = mongoose.model("Payment", paymentSchema); // Đặt tên đúng cho model
+const Payment = mongoose.model("Payment", paymentSchema);
 module.exports = Payment;

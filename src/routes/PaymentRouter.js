@@ -3,24 +3,20 @@ const router = express.Router();
 const paymentController = require("../controllers/PaymentController");
 const { authMiddleware } = require("../middleware/authMiddleware");
 
-// Tạo mới Payment (chỉ Admin)
-router.post("/create-payment", paymentController.createPayment);
+// Create VNPay payment
+router.post("/create", paymentController.createPayment);
 
-// VNPAY Routes
-router.post("/create-vnpay-payment", paymentController.createVnpayPayment);
-router.get("/vnpay-return", paymentController.vnpayReturn);
-router.get("/ipn", paymentController.vnpayIpn);
+// Process COD payment
+router.post("/process-cod", paymentController.processCodPayment);
 
-// Cập nhật Payment (chỉ Admin)
-router.put("/update-payment/:id", authMiddleware,  paymentController.updatePayment);
+// VNPay return and IPN
+router.get("/vnpay-return", paymentController.paymentReturn);
+router.get("/ipn", paymentController.paymentIpn);
 
-// Xóa Payment (chỉ Admin)
-router.delete("/delete-payment/:id", authMiddleware, paymentController.deletePayment);
+// Get payment by order ID
+router.get("/order/:orderId", paymentController.getPaymentByOrderId);
 
-// Lấy chi tiết Payment
-router.get("/get-detail-payment/:id", authMiddleware, paymentController.getDetailsPayment);
-
-// Lấy danh sách tất cả Payments (hỗ trợ phân trang, lọc, sắp xếp)
-router.get("/get-all-payment", authMiddleware, paymentController.getAllPayment);
+// Get all payments (admin only)
+router.get("/all", authMiddleware, paymentController.getAllPayments);
 
 module.exports = router;
