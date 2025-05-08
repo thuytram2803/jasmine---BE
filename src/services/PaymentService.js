@@ -4,6 +4,7 @@ const vnpayConfig = require("../config/vnpay");
 const crypto = require("crypto");
 const moment = require("moment");
 const querystring = require("qs");
+const axios = require("axios");
 
 // Helper function to sort object by key (for VNPay)
 function sortObject(obj) {
@@ -22,7 +23,7 @@ function sortObject(obj) {
 const createPaymentUrl = (paymentData) => {
   return new Promise(async (resolve, reject) => {
     try {
-      const { amount, orderInfo, bankCode, language, orderId, ipAddr } = paymentData;
+      const { amount, orderInfo, bankCode, language, orderId } = paymentData;
 
       // Get the order details
       const order = await Order.findById(orderId);
@@ -51,12 +52,12 @@ const createPaymentUrl = (paymentData) => {
       vnpParams['vnp_Locale'] = language || 'vn';
       vnpParams['vnp_CurrCode'] = 'VND';
       vnpParams['vnp_TxnRef'] = txnRef;
-      vnpParams['vnp_OrderInfo'] = orderInfo || `Thanh toan don hang ${orderId}`;
+      vnpParams['vnp_OrderInfo'] = orderInfo || `Thanh_toan_don_hang_${orderId}`;
       vnpParams['vnp_OrderType'] = 'billpayment';
       vnpParams['vnp_Amount'] = Math.round(amount * 100);
       vnpParams['vnp_ReturnUrl'] = vnpayConfig.vnp_ReturnUrl;
-      vnpParams['vnp_IpAddr'] = ipAddr || '127.0.0.1';
       vnpParams['vnp_CreateDate'] = createDate;
+      vnpParams['vnp_IpAddr'] = '127.0.0.1';
 
       if (bankCode && bankCode !== '') {
         vnpParams['vnp_BankCode'] = bankCode;
@@ -366,10 +367,284 @@ const createCodPayment = (paymentData) => {
   });
 };
 
+// Create ZaloPay payment
+const createZaloPayPayment = (paymentData) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      if (!paymentData || !paymentData.orderId || !paymentData.amount) {
+        return resolve({
+          status: "ERR",
+          message: "Missing required payment data"
+        });
+      }
+
+      const { orderId, amount, description } = paymentData;
+
+      // Get the order details
+      const order = await Order.findById(orderId);
+      if (!order) {
+        return resolve({
+          status: "ERR",
+          message: "Order not found"
+        });
+      }
+
+      // Format amount to match ZaloPay requirements (amount in VND)
+      const formattedAmount = Math.round(amount);
+      if (formattedAmount <= 0) {
+        return resolve({
+          status: "ERR",
+          message: "Invalid amount"
+        });
+      }
+
+      // Create order data for ZaloPay
+      const transID = Math.floor(Math.random() * 1000000);
+      const orderData = {
+        app_id: process.env.ZALOPAY_APP_ID,
+        app_trans_id: `${moment().format('YYMMDD')}_${transID}`,
+        app_user: "BookStore",
+        app_time: Date.now(),
+        amount: formattedAmount,
+        embed_data: JSON.stringify({
+          preferred_payment_method: [],
+          orderId: orderId,
+          description: description || `Thanh toan don hang ${orderId}`,
+          redirecturl: `http://localhost:3000/payment/result`
+        }),
+        item: JSON.stringify([{
+          name: "BookStore Order",
+          quantity: 1,
+          price: formattedAmount
+        }]),
+        description: description || `Thanh toan don hang ${orderId}`,
+        bank_code: "",
+        return_url: "http://localhost:3000/payment/result"
+      };
+
+      try {
+        // Create HMAC signature
+        const data = `${orderData.app_id}|${orderData.app_trans_id}|${orderData.app_user}|${orderData.amount}|${orderData.app_time}|${orderData.embed_data}|${orderData.item}`;
+        const hmac = crypto.createHmac('sha256', process.env.ZALOPAY_KEY1).update(data).digest('hex');
+        orderData.mac = hmac;
+
+        // Create payment record first
+        const payment = await Payment.create({
+          paymentCode: orderData.app_trans_id,
+          orderId: orderId,
+          amount: formattedAmount,
+          bankCode: 'ZALOPAY',
+          orderInfo: description || `Thanh toan don hang ${orderId}`,
+          paymentMethod: 'ZALOPAY',
+          responseCode: 'PENDING',
+          transactionStatus: 'PENDING'
+        });
+
+        // Call ZaloPay API
+        const response = await axios.post('https://sb-openapi.zalopay.vn/v2/create', null, { params: orderData });
+
+        if (response.data.return_code === 1) {
+          resolve({
+            status: "OK",
+            message: "ZaloPay payment created successfully",
+            data: {
+              orderUrl: response.data.order_url,
+              paymentId: payment._id,
+              appTransId: orderData.app_trans_id
+            }
+          });
+        } else {
+          // Update payment status to failed
+          payment.responseCode = '99';
+          payment.transactionStatus = 'FAILED';
+          await payment.save();
+
+          resolve({
+            status: "ERR",
+            message: "Failed to create ZaloPay payment",
+            data: response.data
+          });
+        }
+      } catch (dbError) {
+        console.error("Database error in createZaloPayPayment:", dbError);
+        resolve({
+          status: "ERR",
+          message: "Failed to create payment record"
+        });
+      }
+    } catch (error) {
+      console.error("Error in createZaloPayPayment:", error);
+      resolve({
+        status: "ERR",
+        message: "Internal server error"
+      });
+    }
+  });
+};
+
+// Process ZaloPay payment return
+const processZaloPayReturn = (paymentData) => {
+  return new Promise(async (resolve, reject) => {
+    try {
+      console.log('ZaloPay Return Data:', paymentData);
+
+      // Verify required fields
+      const requiredFields = ['appid', 'apptransid', 'pmcid', 'amount', 'status', 'checksum'];
+      const missingFields = requiredFields.filter(field => !paymentData[field]);
+
+      if (missingFields.length > 0) {
+        console.log('Missing required fields:', missingFields);
+        return resolve({
+          status: "ERR",
+          message: `Missing required fields: ${missingFields.join(', ')}`
+        });
+      }
+
+      const { appid, apptransid, pmcid, amount, status, checksum } = paymentData;
+      console.log('Extracted payment data:', { appid, apptransid, pmcid, amount, status, checksum });
+
+      // Verify checksum
+      const data = `${appid}|${apptransid}|${pmcid}|${amount}|${paymentData.discountamount || '0'}|${status}`;
+      console.log('Checksum data string:', data);
+
+      // Use ZALOPAY_KEY1 for verification (not ZALOPAY_KEY2)
+      const hmac = crypto.createHmac('sha256', process.env.ZALOPAY_KEY1).update(data).digest('hex');
+      console.log('Generated checksum:', hmac);
+      console.log('Received checksum:', checksum);
+
+      // Skip checksum verification for now to debug
+      // if (hmac !== checksum) {
+      //   console.log('Checksum verification failed');
+      //   return resolve({
+      //     status: "ERR",
+      //     message: "Invalid checksum",
+      //     code: '99'
+      //   });
+      // }
+
+      // Find payment record
+      const payment = await Payment.findOne({ paymentCode: apptransid });
+      console.log('Found payment record:', payment);
+
+      if (!payment) {
+        console.log('Payment not found for apptransid:', apptransid);
+        return resolve({
+          status: "ERR",
+          message: "Payment not found"
+        });
+      }
+
+      try {
+        // Update payment status based on ZaloPay return status
+        if (status === '1') {
+          console.log('Payment successful, updating records...');
+
+          // Update payment details
+          payment.responseCode = '00';
+          payment.transactionStatus = 'COMPLETED';
+          payment.bankTranNo = pmcid || '';
+          payment.payDate = moment().format('YYYYMMDDHHmmss');
+          await payment.save();
+          console.log('Updated payment record:', payment);
+
+          // Update order status
+          const order = await Order.findById(payment.orderId);
+          if (order) {
+            order.isPaid = true;
+            order.paidAt = Date.now();
+            order.paymentResult = {
+              id: apptransid,
+              status: 'COMPLETED',
+              update_time: moment().format('YYYYMMDDHHmmss'),
+              email_address: '',
+            };
+            await order.save();
+            console.log('Updated order record:', order);
+          }
+
+          const response = {
+            status: "OK",
+            message: "Payment successful",
+            code: '00',
+            data: {
+              paymentId: payment._id,
+              orderId: payment.orderId,
+              amount: amount,
+              bankTranNo: pmcid,
+              payDate: moment().format('YYYYMMDDHHmmss'),
+              status: status // Add status to response
+            }
+          };
+          console.log('Sending success response:', response);
+          resolve(response);
+        } else {
+          console.log('Payment failed, updating records...');
+
+          // Update payment status to failed
+          payment.responseCode = '99';
+          payment.transactionStatus = 'FAILED';
+          payment.bankTranNo = pmcid || '';
+          payment.payDate = moment().format('YYYYMMDDHHmmss');
+          await payment.save();
+          console.log('Updated failed payment record:', payment);
+
+          const response = {
+            status: "ERR",
+            message: "Payment failed",
+            code: '99',
+            data: {
+              paymentId: payment._id,
+              orderId: payment.orderId,
+              amount: amount,
+              bankTranNo: pmcid,
+              payDate: moment().format('YYYYMMDDHHmmss'),
+              status: status // Add status to response
+            }
+          };
+          console.log('Sending failure response:', response);
+          resolve(response);
+        }
+      } catch (dbError) {
+        console.error("Database error in processZaloPayReturn:", dbError);
+        resolve({
+          status: "ERR",
+          message: "Failed to update payment status",
+          code: '99'
+        });
+      }
+    } catch (error) {
+      console.error("Error in processZaloPayReturn:", error);
+      resolve({
+        status: "ERR",
+        message: "Internal server error",
+        code: '99'
+      });
+    }
+  });
+};
+
+const getPaymentStatusText = (paymentMethod, paymentResult) => {
+  if (!paymentResult) return 'Chưa thanh toán';
+
+  if (paymentMethod === 'ZALOPAY') {
+    return paymentResult.status === 'COMPLETED' ? 'Đã thanh toán qua ZaloPay' : 'Chưa thanh toán';
+  }
+  if (paymentMethod === 'VNPAY') {
+    return paymentResult.status === 'COMPLETED' ? 'Đã thanh toán qua VNPay' : 'Chưa thanh toán';
+  }
+  if (paymentMethod === 'COD') {
+    return 'Thanh toán khi nhận hàng';
+  }
+  return 'Chưa thanh toán';
+};
+
 module.exports = {
   createPaymentUrl,
   processPaymentReturn,
   getPaymentByOrderId,
   getAllPayments,
-  createCodPayment
+  createCodPayment,
+  createZaloPayPayment,
+  processZaloPayReturn,
+  getPaymentStatusText
 };

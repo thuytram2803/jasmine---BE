@@ -18,7 +18,7 @@ const paymentSchema = new mongoose.Schema(
     },
     paymentMethod: {
       type: String,
-      enum: ['VNPAY', 'COD', 'OTHER'],
+      enum: ['VNPAY', 'COD', 'ZALOPAY', 'OTHER'],
       default: 'VNPAY',
       required: true, // Phương thức thanh toán
     },

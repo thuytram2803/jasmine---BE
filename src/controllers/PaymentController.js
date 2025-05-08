@@ -1,21 +1,4 @@
 const PaymentService = require("../services/PaymentService");
-const vnpayConfig = require("../config/vnpay");
-const crypto = require("crypto");
-const moment = require("moment");
-const querystring = require("qs");
-
-// Helper function to sort object by key (for VNPay)
-function sortObject(obj) {
-  const sorted = {};
-  const keys = Object.keys(obj).sort();
-
-  for (const key of keys) {
-    if (obj.hasOwnProperty(key)) {
-      sorted[key] = obj[key];
-    }
-  }
-  return sorted;
-}
 
 //create Payment
 const createPayment = async (req, res) => {
@@ -46,32 +29,16 @@ const createPayment = async (req, res) => {
       });
     }
 
-    // Get IP address
-    let ipAddr = req.headers['x-forwarded-for'] ||
-                req.connection.remoteAddress ||
-                req.socket.remoteAddress ||
-                req.connection.socket.remoteAddress;
-
-    // If IP is IPv6 localhost, convert to IPv4 format
-    if (ipAddr === '::1' || ipAddr.includes('::ffff:')) {
-      ipAddr = '127.0.0.1';
-    }
-
     const paymentData = {
       amount,
       orderInfo: orderInfo || `Thanh toan don hang ${orderId}`,
       bankCode: bankCode || '',
       language: language || 'vn',
-      orderId,
-      ipAddr
+      orderId
     };
 
-    // Console log for debugging
     console.log("Creating VNPay payment with data:", paymentData);
-
     const response = await PaymentService.createPaymentUrl(paymentData);
-
-    // Console log for debugging
     console.log("VNPay payment URL created:", response);
 
     return res.status(200).json(response);
@@ -229,11 +196,146 @@ const processCodPayment = async (req, res) => {
   }
 };
 
+// Create ZaloPay payment
+const createZaloPayPayment = async (req, res) => {
+  try {
+    const { orderId, amount, description } = req.body;
+
+    if (!orderId || !amount) {
+      return res.status(200).json({
+        status: "ERR",
+        message: "OrderId and amount are required"
+      });
+    }
+
+    // Validate that the orderId exists
+    try {
+      const Order = require('../models/OrderModel');
+      const orderExists = await Order.findById(orderId);
+      if (!orderExists) {
+        return res.status(200).json({
+          status: "ERR",
+          message: "Order not found"
+        });
+      }
+    } catch (error) {
+      return res.status(200).json({
+        status: "ERR",
+        message: "Invalid orderId format or order not found"
+      });
+    }
+
+    console.log("Creating ZaloPay payment with data:", { orderId, amount, description });
+    const result = await PaymentService.createZaloPayPayment({
+      orderId,
+      amount,
+      description
+    });
+
+    console.log("ZaloPay payment created:", result);
+    return res.status(200).json(result);
+  } catch (error) {
+    console.error("Error in createZaloPayPayment controller:", error);
+    return res.status(500).json({
+      status: "ERR",
+      message: "Internal server error"
+    });
+  }
+};
+
+// Process ZaloPay payment return
+const processZaloPayReturn = async (req, res) => {
+  try {
+    console.log("ZaloPay return params:", req.query);
+    const paymentData = {
+      appid: req.query.appid,
+      apptransid: req.query.apptransid,
+      pmcid: req.query.pmcid,
+      amount: req.query.amount,
+      discountamount: req.query.discountamount,
+      status: req.query.status,
+      checksum: req.query.checksum
+    };
+
+    // Verify required fields
+    const requiredFields = ['appid', 'apptransid', 'pmcid', 'amount', 'status', 'checksum'];
+    const missingFields = requiredFields.filter(field => !paymentData[field]);
+
+    if (missingFields.length > 0) {
+      console.error("Missing required fields:", missingFields);
+      return res.status(400).json({
+        status: "ERR",
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      });
+    }
+
+    const response = await PaymentService.processZaloPayReturn(paymentData);
+    console.log("ZaloPay return processed:", response);
+
+    // For direct browser returns, redirect to frontend with params
+    if (req.headers.accept?.includes('text/html')) {
+      const baseUrl = 'http://localhost:3000'; // Hardcode frontend URL for development
+      const queryParams = new URLSearchParams({
+        app_trans_id: paymentData.apptransid,
+        status: paymentData.status,
+        amount: paymentData.amount,
+        pmcid: paymentData.pmcid,
+        message: response.message,
+        code: response.code || (paymentData.status === '1' ? '00' : '99')
+      }).toString();
+
+      console.log("Redirecting to frontend with params:", queryParams);
+      return res.redirect(`${baseUrl}/payment/result?${queryParams}`);
+    }
+
+    // For API calls, return JSON
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error("Error processing ZaloPay return:", error);
+    return res.status(500).json({
+      status: "ERR",
+      message: "Internal server error"
+    });
+  }
+};
+
+const getPaymentStatusText = (paymentMethod, paymentResult) => {
+  if (!paymentResult) return 'Chưa thanh toán';
+
+  if (paymentMethod === 'ZALOPAY') {
+    return paymentResult.status === 'COMPLETED' ? 'Đã thanh toán qua ZaloPay' : 'Chưa thanh toán';
+  }
+  if (paymentMethod === 'VNPAY') {
+    return paymentResult.status === 'COMPLETED' ? 'Đã thanh toán qua VNPay' : 'Chưa thanh toán';
+  }
+  if (paymentMethod === 'COD') {
+    return 'Thanh toán khi nhận hàng';
+  }
+  return 'Chưa thanh toán';
+};
+
+const handleConfirmDelivery = async () => {
+  try {
+    const response = await updateOrderStatus(orderId, 'DELIVERED');
+    if (response.status === 'OK') {
+      fetchOrderDetails();
+      alert('Xác nhận nhận hàng thành công!');
+    } else {
+      alert('Không thể xác nhận nhận hàng. Vui lòng thử lại.');
+    }
+  } catch (error) {
+    console.error('Error confirming delivery:', error);
+    alert('Đã xảy ra lỗi. Vui lòng thử lại.');
+  }
+};
+
 module.exports = {
   createPayment,
   paymentReturn,
   paymentIpn,
   getPaymentByOrderId,
   getAllPayments,
-  processCodPayment
+  processCodPayment,
+  createZaloPayPayment,
+  processZaloPayReturn
 };
