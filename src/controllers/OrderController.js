@@ -257,7 +257,7 @@ const getOrdersByUser = async (req, res) => {
       message: "User orders fetched successfully",
       data: orders,
     });
-   
+
   }
    catch (e) {
     console.error("Error in getOrdersByUser:", e);

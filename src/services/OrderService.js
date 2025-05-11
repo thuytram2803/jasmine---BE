@@ -41,7 +41,7 @@ const createOrder = async (orderData) => {
         deliveryDate,
         deliveryTime,
         orderNote = "",
-        status = "PENDING",
+        status = "OrderedSuccessfully",
       } = orderData;
 
       // Tính toán các giá trị tổng
