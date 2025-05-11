@@ -275,13 +275,26 @@ const processZaloPayReturn = async (req, res) => {
     // For direct browser returns, redirect to frontend with params
     if (req.headers.accept?.includes('text/html')) {
       const baseUrl = 'http://localhost:3000'; // Hardcode frontend URL for development
+
+      // Determine the appropriate code based on ZaloPay status
+      let code = response.code;
+      if (!code) {
+        if (paymentData.status === '1') {
+          code = '00'; // Success
+        } else if (paymentData.status === '-49') {
+          code = '24'; // Canceled by user (using VNPay's code for consistency)
+        } else {
+          code = '99'; // General failure
+        }
+      }
+
       const queryParams = new URLSearchParams({
         app_trans_id: paymentData.apptransid,
         status: paymentData.status,
         amount: paymentData.amount,
         pmcid: paymentData.pmcid,
         message: response.message,
-        code: response.code || (paymentData.status === '1' ? '00' : '99')
+        code: code
       }).toString();
 
       console.log("Redirecting to frontend with params:", queryParams);

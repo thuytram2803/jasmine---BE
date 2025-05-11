@@ -577,6 +577,32 @@ const processZaloPayReturn = (paymentData) => {
           };
           console.log('Sending success response:', response);
           resolve(response);
+        } else if (status === '-49') {
+          console.log('Payment canceled by user, updating records...');
+
+          // Update payment status to canceled
+          payment.responseCode = '24'; // Using VNPay's code for user cancellation for consistency
+          payment.transactionStatus = 'CANCELED';
+          payment.bankTranNo = pmcid || '';
+          payment.payDate = moment().format('YYYYMMDDHHmmss');
+          await payment.save();
+          console.log('Updated canceled payment record:', payment);
+
+          const response = {
+            status: "ERR",
+            message: "Giao dịch thất bại do khách hàng hủy giao dịch",
+            code: '24', // Using VNPay's code for user cancellation for consistency
+            data: {
+              paymentId: payment._id,
+              orderId: payment.orderId,
+              amount: amount,
+              bankTranNo: pmcid,
+              payDate: moment().format('YYYYMMDDHHmmss'),
+              status: status // Add status to response
+            }
+          };
+          console.log('Sending cancellation response:', response);
+          resolve(response);
         } else {
           console.log('Payment failed, updating records...');
 
