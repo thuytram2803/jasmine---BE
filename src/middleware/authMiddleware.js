@@ -61,7 +61,15 @@ const authUserMiddleware = (req, res, next) => {
     }
 
     // Kiểm tra quyền admin hoặc user truy cập đúng tài khoản của mình
-    if (decoded?.isAdmin || decoded.id === userId) {
+    // Nếu là route tạo review (/api/review/create), cho phép user đã xác thực
+    // tạo review mà không cần kiểm tra userId trong params
+    if (decoded?.isAdmin ||
+        decoded.id === userId ||
+        !userId || // Trường hợp không có userId trong params (như route tạo review)
+        req.originalUrl.includes('/review/create')) {
+
+      // Đính kèm thông tin user đã giải mã vào request để các controller có thể sử dụng
+      req.user = decoded;
       console.log("User authentication successful");
       next();
     } else {

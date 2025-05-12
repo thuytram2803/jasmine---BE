@@ -20,6 +20,8 @@ const productSchema = new mongoose.Schema(
     // productExpiry: { type: Date, required: true }, //hạn sd
     // productRating: { type: Number, required: false },
     productDescription: { type: String, required: true },
+    averageRating: { type: Number, default: 0 },
+    reviewCount: { type: Number, default: 0 },
   },
   {
     timestamps: true,
