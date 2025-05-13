@@ -27,6 +27,7 @@ const authMiddleware = (req, res, next) => {
     // Kiểm tra quyền admin
     if (user?.isAdmin) {
       console.log("Admin authentication successful");
+      req.user = user;
       next();
     } else {
       return res.status(403).json({
@@ -39,8 +40,6 @@ const authMiddleware = (req, res, next) => {
 
 // Middleware xác thực cho user lấy thông tin cá nhân
 const authUserMiddleware = (req, res, next) => {
-  // console.log("req.headers", req.headers);
-
   const authHeader = req.headers.token;
   if (!authHeader) {
     return res.status(401).json({
@@ -60,22 +59,16 @@ const authUserMiddleware = (req, res, next) => {
       });
     }
 
-    // Kiểm tra quyền admin hoặc user truy cập đúng tài khoản của mình
-    // Nếu là route tạo review (/api/review/create), cho phép user đã xác thực
-    // tạo review mà không cần kiểm tra userId trong params
-    if (decoded?.isAdmin ||
-        decoded.id === userId ||
-        !userId || // Trường hợp không có userId trong params (như route tạo review)
-        req.originalUrl.includes('/review/create')) {
-
-      // Đính kèm thông tin user đã giải mã vào request để các controller có thể sử dụng
+    // Allow any authenticated user to perform the action
+    // This includes adding comments, answers, and accessing their own resources
+    if (decoded?.id) {
       req.user = decoded;
-      console.log("User authentication successful");
+      console.log("User authentication successful, user ID:", decoded.id);
       next();
     } else {
       return res.status(403).json({
         status: "ERR",
-        message: "You are not authorized to access this resource",
+        message: "Invalid user information in token",
       });
     }
   });
