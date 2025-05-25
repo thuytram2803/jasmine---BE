@@ -11,6 +11,7 @@ const DiscountRouter = require("./DiscountRouter");
 const Recommendation = require("./RecommendationRouter");
 const ReviewRouter = require("./ReviewRouter");
 const BlogRouter = require("./BlogRouter");
+const ChatbotRouter = require("./ChatbotRouter");
 
 const routes = (app) => {
   app.use("/api/user", UserRouter);
@@ -25,6 +26,7 @@ const routes = (app) => {
   app.use("/api/recommendation", Recommendation);
   app.use("/api/review", ReviewRouter);
   app.use("/api/blog", BlogRouter);
+  app.use("/api/chatbot", ChatbotRouter);
 };
 
 module.exports = routes;
