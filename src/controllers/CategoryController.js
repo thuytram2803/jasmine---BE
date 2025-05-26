@@ -1,6 +1,6 @@
 const CategoryService = require("../services/CategoryService"); // Đảm bảo đường dẫn đúng
 
-// Tạo loại bánh mới
+// Tạo loại sách mới
 const createCategory = async (req, res) => {
   try {
     const { categoryCode, categoryName } = req.body;
@@ -26,7 +26,7 @@ const createCategory = async (req, res) => {
   }
 };
 
-// Cập nhật thông tin loại bánh
+// Cập nhật thông tin loại sách
 const updateCategory = async (req, res) => {
   try {
     const categoryId = req.params.id;
@@ -49,7 +49,7 @@ const updateCategory = async (req, res) => {
   }
 };
 
-// Xóa loại bánh
+// Xóa loại sách
 const deleteCategory = async (req, res) => {
   try {
     const categoryId = req.params.id;
@@ -71,7 +71,7 @@ const deleteCategory = async (req, res) => {
   }
 };
 
-// Lấy thông tin chi tiết loại bánh
+// Lấy thông tin chi tiết loại sách
 const getDetailsCategory = async (req, res) => {
   try {
     const categoryId = req.params.id;
@@ -100,7 +100,7 @@ const getDetailsCategory = async (req, res) => {
   }
 };
 
-// Lấy danh sách tất cả loại bánh
+// Lấy danh sách tất cả loại sách
 const getAllCategory = async (req, res) => {
   try {
     const { limit, page, sort, filter } = req.query;
@@ -112,7 +112,7 @@ const getAllCategory = async (req, res) => {
       filter
     );
 
-    return res.status(200).json(response); // Trả về danh sách loại bánh
+    return res.status(200).json(response); // Trả về danh sách loại sách
   } catch (e) {
     return res.status(500).json({
       status: "ERR",
