@@ -108,6 +108,13 @@ const createOrder = async (orderData) => {
         });
       }
 
+      // Tự động tính ngày giao hàng dự kiến là 1 tuần kể từ ngày đặt hàng nếu không được cung cấp
+      const expectedDeliveryDate = new Date();
+      expectedDeliveryDate.setDate(expectedDeliveryDate.getDate() + 7); // Thêm 7 ngày
+
+      // Định dạng ngày thành chuỗi YYYY-MM-DD
+      const formattedExpectedDate = expectedDeliveryDate.toISOString().split('T')[0];
+
       // Tạo đơn hàng
       const newOrder = await Order.create({
         orderCode: `ORD-${Date.now()}`,
@@ -118,8 +125,8 @@ const createOrder = async (orderData) => {
         shippingPrice,
         totalItemPrice,
         totalPrice,
-        deliveryDate,
-        deliveryTime,
+        deliveryDate: deliveryDate || formattedExpectedDate,
+        deliveryTime: deliveryTime || "08:00", // Mặc định 8:00 sáng nếu không được cung cấp
         status: statusObj._id,
         orderNote,
       });
